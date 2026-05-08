@@ -29,8 +29,6 @@ jobs:
           cp -r index.html manifest.json sw.js icons libs _site/
 
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -42,9 +40,6 @@ jobs:
   build-apk:
     name: Build Android APK
     runs-on: ubuntu-latest
-    concurrency:
-      group: apk-build
-      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -57,17 +52,6 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platforms;android-34
-            build-tools;34.0.0
-            platform-tools
-
-      - name: Accept Android licenses
-        run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
-
       - name: Show environment
         run: |
           echo "Node: $(node -v)"
@@ -75,16 +59,20 @@ jobs:
           echo "Java: $(java -version 2>&1 | head -1)"
           echo "ANDROID_HOME: $ANDROID_HOME"
           echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-          which convert && convert -version | head -1 || echo "ImageMagick MISSING"
+          ls -la "$ANDROID_HOME" 2>/dev/null || echo "No SDK directory"
 
-      # ── Prepare web assets ──────────────────────────────────────────
+      - name: Accept Android SDK licenses
+        run: |
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          fi
+
       - name: Prepare web bundle
         run: |
           mkdir -p pwa-dist
           cp -r index.html manifest.json sw.js icons libs pwa-dist/
           ls -la pwa-dist/
 
-      # ── Setup Capacitor (bypass interactive cap init) ────────────────
       - name: Write Capacitor config
         run: |
           echo '{"name":"scanvault","version":"1.0.0","private":true}' > package.json
@@ -101,58 +89,46 @@ jobs:
 
       - name: Add Android platform
         run: |
-          set -x
           npx cap add android
           ls -la android/
 
       - name: Copy web assets to Android
-        run: |
-          set -x
-          npx cap copy android
-          ls -la android/app/src/main/assets/public/ | head
+        run: npx cap copy android
 
-      # ── Inject custom icons ──────────────────────────────────────────
       - name: Inject app icons
         run: |
-          set -x
           RES=android/app/src/main/res
-          ls -la $RES/
+          ls $RES/
 
-          # mdpi 48x48 — resize from 72 with ImageMagick
-          convert icons/icon-72.png  -resize 48x48  $RES/mipmap-mdpi/ic_launcher.png
-          convert icons/icon-72.png  -resize 48x48  $RES/mipmap-mdpi/ic_launcher_round.png
-          # hdpi 72x72
-          cp icons/icon-72.png   $RES/mipmap-hdpi/ic_launcher.png
-          cp icons/icon-72.png   $RES/mipmap-hdpi/ic_launcher_round.png
-          # xhdpi 96x96
-          cp icons/icon-96.png   $RES/mipmap-xhdpi/ic_launcher.png
-          cp icons/icon-96.png   $RES/mipmap-xhdpi/ic_launcher_round.png
-          # xxhdpi 144x144
-          cp icons/icon-144.png  $RES/mipmap-xxhdpi/ic_launcher.png
-          cp icons/icon-144.png  $RES/mipmap-xxhdpi/ic_launcher_round.png
-          # xxxhdpi 192x192
-          cp icons/icon-192.png  $RES/mipmap-xxxhdpi/ic_launcher.png
-          cp icons/icon-192.png  $RES/mipmap-xxxhdpi/ic_launcher_round.png
+          if command -v convert >/dev/null 2>&1; then
+            convert icons/icon-72.png -resize 48x48 $RES/mipmap-mdpi/ic_launcher.png
+            convert icons/icon-72.png -resize 48x48 $RES/mipmap-mdpi/ic_launcher_round.png
+          else
+            cp icons/icon-72.png $RES/mipmap-mdpi/ic_launcher.png
+            cp icons/icon-72.png $RES/mipmap-mdpi/ic_launcher_round.png
+          fi
 
-          # Remove any adaptive icon XML so our PNGs are used directly
+          for pair in "72:hdpi" "96:xhdpi" "144:xxhdpi" "192:xxxhdpi"; do
+            size=${pair%:*}; d=${pair#*:}
+            cp icons/icon-$size.png $RES/mipmap-$d/ic_launcher.png
+            cp icons/icon-$size.png $RES/mipmap-$d/ic_launcher_round.png
+          done
+
           rm -f $RES/mipmap-anydpi-v26/ic_launcher.xml
           rm -f $RES/mipmap-anydpi-v26/ic_launcher_round.xml
-
           echo "Icons injected ✓"
 
-      # ── Build APK ────────────────────────────────────────────────────
       - name: Build debug APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace --info 2>&1 | tail -200
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Stage APK
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk ScanVault.apk
           ls -lh ScanVault.apk
 
-      # ── Upload as artifact (always available) ────────────────────────
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -160,7 +136,6 @@ jobs:
           path: ScanVault.apk
           retention-days: 90
 
-      # ── Create GitHub Release with APK ───────────────────────────────
       - name: Create Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
