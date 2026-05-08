@@ -10,15 +10,13 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: pages-deploy
-  cancel-in-progress: false
-
 jobs:
   deploy:
     name: Deploy to GitHub Pages
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -42,6 +40,9 @@ jobs:
   build-apk:
     name: Build Android APK
     runs-on: ubuntu-latest
+    concurrency:
+      group: apk-build
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -54,30 +55,79 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # ── Prepare web assets ──────────────────────────────────────────
       - name: Prepare web bundle
         run: |
           mkdir -p pwa-dist
           cp -r index.html manifest.json sw.js icons libs pwa-dist/
 
-      - name: Capacitor init
+      # ── Setup Capacitor (bypass interactive cap init) ────────────────
+      - name: Setup Capacitor
         run: |
-          npm init -y
-          npm install --save @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "ScanVault" "com.scanvault.app" --web-dir=pwa-dist
+          cat > package.json << 'PKGJSON'
+          {
+            "name": "scanvault",
+            "version": "1.0.0",
+            "private": true
+          }
+          PKGJSON
+
+          npm install --save-exact \
+            @capacitor/core@6 \
+            @capacitor/cli@6 \
+            @capacitor/android@6
+
+          cat > capacitor.config.json << 'CAPCFG'
+          {
+            "appId": "com.scanvault.app",
+            "appName": "ScanVault",
+            "webDir": "pwa-dist",
+            "android": {
+              "allowMixedContent": false,
+              "backgroundColor": "#0b0c12"
+            }
+          }
+          CAPCFG
+
           npx cap add android
           npx cap copy android
 
+      # ── Inject custom icons ──────────────────────────────────────────
+      - name: Inject app icons
+        run: |
+          RES=android/app/src/main/res
+
+          # mdpi 48x48 — resize from 72 with ImageMagick
+          convert icons/icon-72.png  -resize 48x48  $RES/mipmap-mdpi/ic_launcher.png
+          convert icons/icon-72.png  -resize 48x48  $RES/mipmap-mdpi/ic_launcher_round.png
+          # hdpi 72x72
+          cp icons/icon-72.png   $RES/mipmap-hdpi/ic_launcher.png
+          cp icons/icon-72.png   $RES/mipmap-hdpi/ic_launcher_round.png
+          # xhdpi 96x96
+          cp icons/icon-96.png   $RES/mipmap-xhdpi/ic_launcher.png
+          cp icons/icon-96.png   $RES/mipmap-xhdpi/ic_launcher_round.png
+          # xxhdpi 144x144
+          cp icons/icon-144.png  $RES/mipmap-xxhdpi/ic_launcher.png
+          cp icons/icon-144.png  $RES/mipmap-xxhdpi/ic_launcher_round.png
+          # xxxhdpi 192x192
+          cp icons/icon-192.png  $RES/mipmap-xxxhdpi/ic_launcher.png
+          cp icons/icon-192.png  $RES/mipmap-xxxhdpi/ic_launcher_round.png
+
+          echo "Icons injected ✓"
+
+      # ── Build APK ────────────────────────────────────────────────────
       - name: Build debug APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Stage APK
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk ScanVault.apk
           ls -lh ScanVault.apk
 
+      # ── Upload as artifact (always available) ────────────────────────
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -85,21 +135,26 @@ jobs:
           path: ScanVault.apk
           retention-days: 90
 
-      - name: Create release with APK
+      # ── Create GitHub Release with APK ───────────────────────────────
+      - name: Create Release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: ScanVault v1.0.${{ github.run_number }}
           body: |
-            ## ScanVault — APK lista para instalar
+            ## ScanVault — APK lista para instalar 📱
 
             Descarga `ScanVault.apk` y transfiérelo a tu móvil Android.
 
             **Para instalar:**
-            1. Activa "Instalar apps de fuentes desconocidas" para tu navegador/gestor de archivos
-            2. Toca el APK y pulsa "Instalar"
+            1. Abre el APK desde el gestor de archivos
+            2. Si aparece "fuentes desconocidas", actívalo y continúa
+            3. Pulsa **Instalar**
 
-            La app funciona 100% offline.
+            La app funciona **100% offline**, sin publicidad.
           files: ScanVault.apk
-          fail_on_unmatched_files: true
+          make_latest: true
+          fail_on_unmatched_files: false
