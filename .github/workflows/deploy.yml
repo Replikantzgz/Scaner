@@ -1,0 +1,105 @@
+name: Deploy & Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare site
+        run: |
+          mkdir -p _site
+          cp -r index.html manifest.json sw.js icons libs _site/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare web bundle
+        run: |
+          mkdir -p pwa-dist
+          cp -r index.html manifest.json sw.js icons libs pwa-dist/
+
+      - name: Capacitor init
+        run: |
+          npm init -y
+          npm install --save @capacitor/core @capacitor/cli @capacitor/android
+          npx cap init "ScanVault" "com.scanvault.app" --web-dir=pwa-dist
+          npx cap add android
+          npx cap copy android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Stage APK
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk ScanVault.apk
+          ls -lh ScanVault.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScanVault-APK
+          path: ScanVault.apk
+          retention-days: 90
+
+      - name: Create release with APK
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: ScanVault v1.0.${{ github.run_number }}
+          body: |
+            ## ScanVault — APK lista para instalar
+
+            Descarga `ScanVault.apk` y transfiérelo a tu móvil Android.
+
+            **Para instalar:**
+            1. Activa "Instalar apps de fuentes desconocidas" para tu navegador/gestor de archivos
+            2. Toca el APK y pulsa "Instalar"
+
+            La app funciona 100% offline.
+          files: ScanVault.apk
+          fail_on_unmatched_files: true

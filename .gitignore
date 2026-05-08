@@ -1,0 +1,8 @@
+node_modules/
+android/
+pwa-dist/
+_site/
+package.json
+package-lock.json
+capacitor.config.json
+ScanVault.apk
