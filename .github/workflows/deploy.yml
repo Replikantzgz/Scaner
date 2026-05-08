@@ -60,7 +60,10 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'platforms;android-34 build-tools;34.0.0 platform-tools'
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            platform-tools
 
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
@@ -82,34 +85,18 @@ jobs:
           ls -la pwa-dist/
 
       # ── Setup Capacitor (bypass interactive cap init) ────────────────
-      - name: Install Capacitor
+      - name: Write Capacitor config
         run: |
-          set -x
-          cat > package.json << 'PKGJSON'
-          {
-            "name": "scanvault",
-            "version": "1.0.0",
-            "private": true
-          }
-          PKGJSON
+          echo '{"name":"scanvault","version":"1.0.0","private":true}' > package.json
+          echo '{"appId":"com.scanvault.app","appName":"ScanVault","webDir":"pwa-dist","android":{"backgroundColor":"#0b0c12"}}' > capacitor.config.json
+          cat capacitor.config.json
 
+      - name: Install Capacitor packages
+        run: |
           npm install --save-exact \
             @capacitor/core@6.1.2 \
             @capacitor/cli@6.1.2 \
             @capacitor/android@6.1.2
-
-          cat > capacitor.config.json << 'CAPCFG'
-          {
-            "appId": "com.scanvault.app",
-            "appName": "ScanVault",
-            "webDir": "pwa-dist",
-            "android": {
-              "backgroundColor": "#0b0c12"
-            }
-          }
-          CAPCFG
-
-          cat capacitor.config.json
           npx cap --version
 
       - name: Add Android platform
