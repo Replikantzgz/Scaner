@@ -111,9 +111,9 @@ canvas{display:none}
 .multi-btn.primary{color:var(--ac);border-color:rgba(27,169,123,.25);background:rgba(27,169,123,.08)}
 
 /* CAMERA */
-#screen-camera{background:#000;position:fixed;inset:0;z-index:200;display:none;flex-direction:column}
-#screen-camera.active{display:flex}
-#video-feed{flex:1;width:100%;object-fit:cover;background:#000}
+#screen-camera{background:#000;position:fixed;inset:0;z-index:200;display:none;overflow:hidden}
+#screen-camera.active{display:block}
+#video-feed{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;background:#000}
 .cam-overlay{position:absolute;inset:0;pointer-events:none}
 .scan-frame{position:absolute;top:50%;left:50%;transform:translate(-50%,-52%);width:78%;aspect-ratio:3/4;border:1.5px solid rgba(255,255,255,.4);border-radius:10px}
 .scan-frame::before,.scan-frame::after,.sfi::before,.sfi::after{content:'';position:absolute;width:22px;height:22px;border-color:#fff;border-style:solid}
@@ -718,6 +718,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;heigh
 </div>
 
 <script>
+const APP_VERSION='__APP_VERSION__'; // replaced by CI at build time
+const GH_REPO='Replikantzgz/Scaner';
 const SK='sv_scans_v3',FK='sv_folders_v1';
 const db={
   scans:()=>{try{return JSON.parse(localStorage.getItem(SK)||'[]')}catch{return[]}},
@@ -1373,12 +1375,36 @@ function showProc(show,txt){document.getElementById('proc').classList.toggle('ac
 function openModal(id){document.getElementById(id).classList.add('active')}
 function closeModal(id){document.getElementById(id).classList.remove('active')}
 
+// UPDATE CHECKER
+async function checkForUpdates(){
+  if(APP_VERSION==='__APP_VERSION__')return; // dev/web mode, skip
+  try{
+    const r=await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`,
+      {cache:'no-store',headers:{Accept:'application/vnd.github.v3+json'}});
+    if(!r.ok)return;
+    const data=await r.json();
+    const latest=(data.tag_name||'').replace(/^v/,'');
+    if(!latest||latest===APP_VERSION)return;
+    const dlUrl=data.assets?.find(a=>a.name.endsWith('.apk'))?.browser_download_url||data.html_url;
+    showUpdateBanner(latest,dlUrl);
+  }catch{}
+}
+function showUpdateBanner(ver,dlUrl){
+  if(document.getElementById('update-banner'))return;
+  const b=document.createElement('div');
+  b.id='update-banner';
+  b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:600;background:linear-gradient(135deg,#1BA97B,#2563EB);color:#fff;padding:11px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-family:var(--font);font-size:12px;font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.35);safe-area-inset-top:env(safe-area-inset-top)';
+  b.innerHTML=`<span>Nueva versión disponible: v${ver}</span><div style="display:flex;gap:8px;align-items:center"><a href="${dlUrl}" target="_blank" style="background:rgba(255,255,255,.22);color:#fff;padding:5px 13px;border-radius:8px;text-decoration:none;font-size:11px;font-weight:700;white-space:nowrap">Descargar</a><button onclick="document.getElementById('update-banner').remove()" style="background:none;border:none;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 2px">×</button></div>`;
+  document.body.prepend(b);
+}
+
 // INIT
 (function(){
   const isDark=document.documentElement.getAttribute('data-theme')==='dark';
   syncThemeUI(isDark);
   document.getElementById('theme-color-meta').setAttribute('content',isDark?'#0C0E1A':'#1BA97B');
   renderHome();
+  setTimeout(checkForUpdates,3000); // check after 3s to not block startup
 })();
 
 window.addEventListener('popstate',()=>{
