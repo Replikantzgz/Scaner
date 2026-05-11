@@ -740,6 +740,8 @@ let adjustImg=null,selectedFolderEmoji='📁';
 let zoomLevel=1;
 let scanEditSrc=null,scanEditCorners=[{x:.05,y:.05},{x:.95,y:.05},{x:.95,y:.95},{x:.05,y:.95}],scanEditMode='mejorar';
 let pendingGalleryUrls=[];
+let capturedOrigPages=[];
+let galleryAutoScan=false;
 let scanEditDragSetup=false;
 
 // THEME
@@ -868,11 +870,12 @@ function handleGalleryDirect(e){
   showProc(true,'Cargando...');
   Promise.all(files.map(f=>new Promise(res=>{const r=new FileReader();r.onload=ev=>res(ev.target.result);r.readAsDataURL(f)}))).then(urls=>{
     showProc(false);
-    capturedPages=[];pendingAddTo=null;currentMode='auto';
+    capturedPages=[];capturedOrigPages=[];pendingAddTo=null;currentMode='auto';
     pendingGalleryUrls=urls.slice(1);
     document.getElementById('screen-camera').classList.add('active');
     document.getElementById('bottom-nav').style.display='none';
     currentScreen='camera';
+    galleryAutoScan=true;
     showScanEdit(urls[0]);
   });
   e.target.value='';
@@ -896,7 +899,7 @@ function confirmAddFolder(){
 
 // CAMERA
 async function openCamera(){
-  capturedPages=[];pendingAddTo=null;pendingGalleryUrls=[];
+  capturedPages=[];capturedOrigPages=[];pendingAddTo=null;pendingGalleryUrls=[];
   document.getElementById('screen-camera').classList.add('active');
   document.getElementById('bottom-nav').style.display='none';
   currentScreen='camera';
@@ -950,11 +953,12 @@ function closeCamera(){
   stopCameraAndGoHome();
 }
 function stopCameraAndGoHome(){
+  galleryAutoScan=false;
   if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
   document.getElementById('screen-camera').classList.remove('active');
   document.getElementById('screen-scan-edit').classList.remove('active');
   document.getElementById('bottom-nav').style.display='flex';
-  capturedPages=[];pendingGalleryUrls=[];
+  capturedPages=[];capturedOrigPages=[];pendingGalleryUrls=[];
   showScreen('home');
 }
 function capturePhoto(){
@@ -984,6 +988,7 @@ function handleGallery(e){
   Promise.all(files.map(f=>new Promise(res=>{const r=new FileReader();r.onload=ev=>res(ev.target.result);r.readAsDataURL(f)}))).then(urls=>{
     showProc(false);
     pendingGalleryUrls=urls.slice(1);
+    galleryAutoScan=true;
     showScanEdit(urls[0]);
   });
   e.target.value='';
@@ -1010,8 +1015,6 @@ function showScanEdit(imageUrl){
   document.querySelectorAll('.scan-mode-pill').forEach(p=>p.classList.remove('active'));
   document.querySelector('.scan-mode-pill').classList.add('active');
   document.getElementById('scan-edit-pg').textContent=`Página ${capturedPages.length+1}`;
-  document.getElementById('screen-scan-edit').classList.add('active');
-  document.getElementById('screen-camera').classList.remove('active');
   document.getElementById('bottom-nav').style.display='none';
   const img=new Image();
   img.onload=()=>{
@@ -1023,15 +1026,26 @@ function showScanEdit(imageUrl){
     c.style.width=Math.round(img.width*sc)+'px';
     c.style.height=Math.round(img.height*sc)+'px';
     c.getContext('2d').drawImage(img,0,0);
-    // Auto-detect document corners
+    if(!scanEditDragSetup){setupScanEditDrag();scanEditDragSetup=true;}
     const detected=autoDetectDocumentCorners(c);
     if(detected)scanEditCorners=detected;
+    // If from gallery and detection succeeded, auto-process without showing edit UI
+    if(galleryAutoScan&&detected){
+      confirmScanPage(false);
+      return;
+    }
+    // Manual mode: show the edit UI
+    document.getElementById('screen-scan-edit').classList.add('active');
+    document.getElementById('screen-camera').classList.remove('active');
     updateCornerOverlay();
-    // Apply default preview filter
-    c.style.filter='grayscale(1) contrast(1.6) brightness(1.05)';
-    if(!scanEditDragSetup){setupScanEditDrag();scanEditDragSetup=true;}
+    c.style.filter='grayscale(1) contrast(1.5) brightness(1.08)';
   };
   img.src=imageUrl;
+  // Show screen immediately only for camera (gallery waits for detection result)
+  if(!galleryAutoScan){
+    document.getElementById('screen-scan-edit').classList.add('active');
+    document.getElementById('screen-camera').classList.remove('active');
+  }
 }
 function updateCornerOverlay(){
   const c=document.getElementById('scan-edit-canvas');
@@ -1081,6 +1095,7 @@ function setScanEditMode(mode,el){
   c.style.filter=filterMap[mode]||'';
 }
 function cancelScanEdit(){
+  galleryAutoScan=false;
   document.getElementById('scan-edit-canvas').style.filter='';
   document.getElementById('screen-scan-edit').classList.remove('active');
   if(camStream){
@@ -1094,8 +1109,9 @@ function cancelScanEdit(){
 async function confirmScanPage(andFinalize){
   showProc(true,'Procesando escaneo...');
   try{
-    const processed=await processScanImage();
+    const {processed,original}=await processScanImage();
     capturedPages.push(processed);
+    capturedOrigPages.push(original);
     document.getElementById('scan-edit-canvas').style.filter='';
     document.getElementById('screen-scan-edit').classList.remove('active');
     showProc(false);
@@ -1124,8 +1140,10 @@ async function processScanImage(){
       src.getContext('2d').drawImage(img,0,0,sw,sh);
       const pixCorners=scanEditCorners.map(c=>({x:c.x*sw,y:c.y*sh}));
       const warped=perspectiveWarp(src,pixCorners);
+      const original=warped.toDataURL('image/jpeg',.93);
       enhanceScanImage(warped,scanEditMode);
-      resolve(warped.toDataURL('image/jpeg',.93));
+      const processed=warped.toDataURL('image/jpeg',.93);
+      resolve({processed,original});
     };
     img.src=scanEditSrc;
   });
@@ -1289,7 +1307,7 @@ function enhanceScanImage(canvas,mode){
       const x2=Math.min(w-1,x+half),y2=Math.min(h-1,y+half);
       const cnt=(x2-x1+1)*(y2-y1+1);
       const sum=ii[(y2+1)*(w+1)+(x2+1)]-ii[y1*(w+1)+(x2+1)]-ii[(y2+1)*(w+1)+x1]+ii[y1*(w+1)+x1];
-      const v=gv[y*w+x]<sum/cnt*0.84?0:255;
+      const v=gv[y*w+x]<sum/cnt*0.82?15:250;
       const oi=(y*w+x)*4;
       d[oi]=d[oi+1]=d[oi+2]=v;
     }
@@ -1324,24 +1342,24 @@ function confirmSaveDoc(){
   if(!capturedPages.length){stopCameraAndGoHome();return;}
   if(pendingAddTo){
     const existing=db.scans().find(s=>s.id===pendingAddTo);
-    if(existing){db.upd(pendingAddTo,{pages:[...(existing.pages||[]),...capturedPages]});showToast(`${capturedPages.length} pág. añadida(s)`);}
-    const addId=pendingAddTo;capturedPages=[];pendingGalleryUrls=[];pendingAddTo=null;
+    if(existing){db.upd(pendingAddTo,{pages:[...(existing.pages||[]),...capturedPages],origPages:[...(existing.origPages||existing.pages||[]),...capturedOrigPages]});showToast(`${capturedPages.length} pág. añadida(s)`);}
+    const addId=pendingAddTo;capturedPages=[];capturedOrigPages=[];pendingGalleryUrls=[];pendingAddTo=null;
     stopCameraAndGoHome();
     setTimeout(()=>openViewer(addId),400);
     return;
   }
   const catMap={auto:'doc',doc:'doc',id:'id',receipt:'receipt',book:'book'};
   const now=Date.now();
-  const scan={id:'sv_'+now,name,category:catMap[currentMode]||'doc',ts:now,pages:[...capturedPages],filter:'none',fav:false,folder:''};
+  const scan={id:'sv_'+now,name,category:catMap[currentMode]||'doc',ts:now,pages:[...capturedPages],origPages:[...capturedOrigPages],filter:'none',fav:false,folder:''};
   db.add(scan);
-  capturedPages=[];pendingGalleryUrls=[];
+  capturedPages=[];capturedOrigPages=[];pendingGalleryUrls=[];
   stopCameraAndGoHome();
   renderHome();showToast('Guardado');
   setTimeout(()=>openViewer(scan.id),400);
 }
 function discardScan(){
   closeModal('save-doc-modal');
-  capturedPages=[];pendingGalleryUrls=[];
+  capturedPages=[];capturedOrigPages=[];pendingGalleryUrls=[];
   stopCameraAndGoHome();
 }
 function saveScan(addToId=null){
@@ -1385,11 +1403,14 @@ function openViewer(id){
   },100);
 }
 function renderViewerPages(scan){
-  const pages=scan.pages||[scan.data],fs=getFilterStyle(viewingFilter);
+  const processed=scan.pages||[scan.data];
+  const useOrig=viewingFilter==='none'&&scan.origPages&&scan.origPages.length===processed.length;
+  const pages=useOrig?scan.origPages:processed;
+  const fs=useOrig?'':getFilterStyle(viewingFilter);
   document.getElementById('viewer-body').innerHTML='<div class="drag-hint">Mantén para reordenar páginas</div>'+pages.map((p,i)=>`
     <div class="viewer-page" data-idx="${i}">
       <img src="${p}" style="${fs}" loading="lazy">
-      <div class="page-num">${i+1} / ${pages.length}</div>
+      <div class="page-num">${i+1} / ${processed.length}</div>
       <button class="page-del-btn" onclick="deletePage(${i})">✕</button>
     </div>`).join('');
 }
@@ -1487,17 +1508,24 @@ function closeModal(id){document.getElementById(id).classList.remove('active')}
 
 // UPDATE CHECKER
 async function checkForUpdates(){
-  if(APP_VERSION==='__APP_VERSION__')return; // dev/web mode, skip
+  if(APP_VERSION==='__APP_VERSION__')return;
   try{
+    const ctrl=new AbortController();
+    const tid=setTimeout(()=>ctrl.abort(),8000);
     const r=await fetch(`https://api.github.com/repos/${GH_REPO}/releases/latest`,
-      {cache:'no-store',headers:{Accept:'application/vnd.github.v3+json'}});
+      {cache:'no-store',signal:ctrl.signal,headers:{Accept:'application/vnd.github.v3+json'}});
+    clearTimeout(tid);
     if(!r.ok)return;
     const data=await r.json();
     const latest=(data.tag_name||'').replace(/^v/,'');
-    if(!latest||latest===APP_VERSION)return;
+    if(!latest)return;
+    const parseV=v=>v.split('.').map(Number);
+    const [la,lb,lc]=parseV(latest),[ca,cb,cc]=parseV(APP_VERSION);
+    const newer=(la>ca)||(la===ca&&lb>cb)||(la===ca&&lb===cb&&lc>cc);
+    if(!newer)return;
     const dlUrl=data.assets?.find(a=>a.name.endsWith('.apk'))?.browser_download_url||data.html_url;
     showUpdateBanner(latest,dlUrl);
-  }catch{}
+  }catch(e){if(e.name!=='AbortError')console.warn('Update check:',e);}
 }
 function showUpdateBanner(ver,dlUrl){
   if(document.getElementById('update-banner'))return;
@@ -1518,13 +1546,14 @@ function showUpdateBanner(ver,dlUrl){
 })();
 
 window.addEventListener('popstate',()=>{
-  history.pushState(null,null,location.href); // always keep an entry so next back works
-  if(document.getElementById('screen-scan-edit').classList.contains('active')){cancelScanEdit();}
+  if(document.getElementById('screen-scan-edit').classList.contains('active'))cancelScanEdit();
   else if(document.getElementById('screen-camera').classList.contains('active')){if(capturedPages.length>0)showSaveDocModal();else stopCameraAndGoHome();}
   else if(document.getElementById('screen-viewer').classList.contains('active'))closeViewer();
   else if(document.getElementById('screen-crop').classList.contains('active'))closeCrop();
   else if(document.getElementById('screen-adjust').classList.contains('active'))closeAdjust(false);
   else if(currentScreen!=='home')showScreen('home');
+  // Always replenish the history buffer so back never exits the app
+  setTimeout(()=>history.pushState(null,'',location.href),0);
 });
 history.pushState(null,null,location.href);
 let lT=0;document.addEventListener('touchend',e=>{const n=Date.now();if(n-lT<340)e.preventDefault();lT=n},{passive:false});
