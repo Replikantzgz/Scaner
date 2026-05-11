@@ -1035,8 +1035,13 @@ function showScanEdit(imageUrl){
 }
 function updateCornerOverlay(){
   const c=document.getElementById('scan-edit-canvas');
-  const r=c.getBoundingClientRect();
-  const pts=scanEditCorners.map(p=>({x:r.left+p.x*r.width,y:r.top+p.y*r.height}));
+  const body=document.getElementById('scan-edit-body');
+  const cr=c.getBoundingClientRect();
+  const br=body.getBoundingClientRect();
+  const pts=scanEditCorners.map(p=>({
+    x:(cr.left-br.left)+p.x*cr.width,
+    y:(cr.top-br.top)+p.y*cr.height
+  }));
   document.getElementById('corner-poly').setAttribute('points',pts.map(p=>`${p.x},${p.y}`).join(' '));
   pts.forEach((p,i)=>{const h=document.getElementById(`ch-se-${i}`);h.setAttribute('cx',p.x);h.setAttribute('cy',p.y);});
 }
@@ -1126,63 +1131,53 @@ async function processScanImage(){
   });
 }
 
-// AUTO DOCUMENT CORNER DETECTION
+// AUTO DOCUMENT CORNER DETECTION — Otsu threshold + bright-region flood-fill
 function autoDetectDocumentCorners(srcCanvas){
-  // Works on a downscaled copy — returns 4 normalized corners [TL,TR,BR,BL] or null
-  const PW=320;
+  const PW=300;
   const sc=PW/srcCanvas.width;
   const PH=Math.round(srcCanvas.height*sc);
   const tmp=document.createElement('canvas');
   tmp.width=PW;tmp.height=PH;
   tmp.getContext('2d').drawImage(srcCanvas,0,0,PW,PH);
   const d=tmp.getContext('2d').getImageData(0,0,PW,PH).data;
+  const N=PW*PH;
 
-  // Grayscale
-  const g=new Uint8Array(PW*PH);
-  for(let i=0;i<PW*PH;i++) g[i]=(77*d[i*4]+150*d[i*4+1]+29*d[i*4+2])>>8;
-
-  // Box blur ×2 ≈ Gaussian
-  function boxBlur(s,r){
-    const o=new Uint8Array(PW*PH);
-    for(let y=0;y<PH;y++) for(let x=0;x<PW;x++){
-      let sum=0,cnt=0;
-      for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
-        const nx=Math.max(0,Math.min(PW-1,x+dx)),ny=Math.max(0,Math.min(PH-1,y+dy));
-        sum+=s[ny*PW+nx];cnt++;
-      }
-      o[y*PW+x]=sum/cnt;
+  // Grayscale with 3×3 blur
+  const g=new Uint8Array(N);
+  for(let y=0;y<PH;y++) for(let x=0;x<PW;x++){
+    let s=0,n=0;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+      const nx=Math.max(0,Math.min(PW-1,x+dx)),ny=Math.max(0,Math.min(PH-1,y+dy));
+      s+=(77*d[(ny*PW+nx)*4]+150*d[(ny*PW+nx)*4+1]+29*d[(ny*PW+nx)*4+2])>>8;n++;
     }
-    return o;
-  }
-  const bl=boxBlur(boxBlur(g,2),2);
-
-  // Sobel
-  const edge=new Uint8Array(PW*PH);
-  let maxE=0;
-  for(let y=1;y<PH-1;y++) for(let x=1;x<PW-1;x++){
-    const gx=-bl[(y-1)*PW+(x-1)]+bl[(y-1)*PW+(x+1)]-2*bl[y*PW+(x-1)]+2*bl[y*PW+(x+1)]-bl[(y+1)*PW+(x-1)]+bl[(y+1)*PW+(x+1)];
-    const gy=-bl[(y-1)*PW+(x-1)]-2*bl[(y-1)*PW+x]-bl[(y-1)*PW+(x+1)]+bl[(y+1)*PW+(x-1)]+2*bl[(y+1)*PW+x]+bl[(y+1)*PW+(x+1)];
-    const m=Math.min(255,Math.hypot(gx,gy)+0.5|0);
-    edge[y*PW+x]=m;if(m>maxE)maxE=m;
-  }
-  if(maxE<8)return null;
-
-  // Threshold + dilate to close gaps
-  const thr=maxE*0.12;
-  const bin=new Uint8Array(PW*PH);
-  for(let i=0;i<PW*PH;i++) bin[i]=edge[i]>thr?1:0;
-  const DR=Math.max(2,PW*0.012|0);
-  const dil=new Uint8Array(PW*PH);
-  for(let y=DR;y<PH-DR;y++) for(let x=DR;x<PW-DR;x++){
-    let f=0;
-    outer:for(let dy=-DR;dy<=DR;dy++) for(let dx=-DR;dx<=DR;dx++) if(bin[(y+dy)*PW+(x+dx)]){f=1;break outer;}
-    dil[y*PW+x]=f;
+    g[y*PW+x]=s/n;
   }
 
-  // Flood-fill background from all 4 borders
-  const bg=new Uint8Array(PW*PH);
+  // Otsu threshold
+  const hist=new Uint32Array(256);
+  for(let i=0;i<N;i++) hist[g[i]]++;
+  let sum=0; for(let i=0;i<256;i++) sum+=i*hist[i];
+  let sumB=0,wB=0,maxVar=0,thresh=128;
+  for(let t=0;t<256;t++){
+    wB+=hist[t];if(!wB)continue;
+    const wF=N-wB;if(!wF)break;
+    sumB+=t*hist[t];
+    const mB=sumB/wB,mF=(sum-sumB)/wF;
+    const v=wB*wF*(mB-mF)*(mB-mF);
+    if(v>maxVar){maxVar=v;thresh=t;}
+  }
+
+  // Bright mask (document is assumed brighter than background)
+  const bright=new Uint8Array(N);
+  let brightCnt=0;
+  for(let i=0;i<N;i++){if(g[i]>thresh){bright[i]=1;brightCnt++;}}
+  // If image is mostly bright (light bg), invert
+  if(brightCnt>N*0.70) for(let i=0;i<N;i++) bright[i]=1-bright[i];
+
+  // Flood-fill dark background from all 4 borders
+  const bg=new Uint8Array(N);
   const q=[];
-  const mark=i=>{if(!bg[i]&&!dil[i]){bg[i]=1;q.push(i);}};
+  const mark=i=>{if(!bg[i]&&!bright[i]){bg[i]=1;q.push(i);}};
   for(let x=0;x<PW;x++){mark(x);mark((PH-1)*PW+x);}
   for(let y=0;y<PH;y++){mark(y*PW);mark(y*PW+PW-1);}
   for(let qi=0;qi<q.length;qi++){
@@ -1191,33 +1186,30 @@ function autoDetectDocumentCorners(srcCanvas){
     if(y>0)mark(idx-PW);if(y<PH-1)mark(idx+PW);
   }
 
-  // Find extreme corners of non-background region (TL=min x+y, TR=max x-y, BR=max x+y, BL=min x-y)
+  // Extreme corners of (bright AND not background) = document pixels
   let tlI=-1,trI=-1,brI=-1,blI=-1;
   let minS=Infinity,maxD=-Infinity,maxS=-Infinity,minD=Infinity;
   let cnt=0;
   for(let y=0;y<PH;y++) for(let x=0;x<PW;x++){
-    if(bg[y*PW+x])continue;cnt++;
-    if(x+y<minS){minS=x+y;tlI=y*PW+x;}
-    if(x-y>maxD){maxD=x-y;trI=y*PW+x;}
-    if(x+y>maxS){maxS=x+y;brI=y*PW+x;}
-    if(x-y<minD){minD=x-y;blI=y*PW+x;}
+    const i=y*PW+x;
+    if(!bright[i]||bg[i])continue; cnt++;
+    const s=x+y,diff=x-y;
+    if(s<minS){minS=s;tlI=i;}
+    if(diff>maxD){maxD=diff;trI=i;}
+    if(s>maxS){maxS=s;brI=i;}
+    if(diff<minD){minD=diff;blI=i;}
   }
 
-  // Must cover ≥20% of image and be a valid quad
-  if(cnt<PW*PH*0.20||tlI<0)return null;
-
+  if(cnt<N*0.10||tlI<0)return null;
   const toN=i=>({x:(i%PW)/PW,y:((i/PW)|0)/PH});
   const corners=[toN(tlI),toN(trI),toN(brI),toN(blI)];
 
-  // Sanity: quad area must be >10% of image
-  const area=Math.abs((corners[0].x-corners[2].x)*(corners[1].y-corners[3].y)-(corners[1].x-corners[3].x)*(corners[0].y-corners[2].y))/2;
-  if(area<0.10)return null;
+  // Sanity: bounding box must span ≥25% in each axis
+  const xs=corners.map(c=>c.x),ys=corners.map(c=>c.y);
+  if(Math.max(...xs)-Math.min(...xs)<0.25||Math.max(...ys)-Math.min(...ys)<0.25)return null;
 
-  // Add small inset so handles don't sit on the very edge
-  return corners.map((c,i)=>{
-    const cx=0.5,cy=0.5;
-    return{x:c.x+(cx-c.x)*0.04,y:c.y+(cy-c.y)*0.04};
-  });
+  // Small inset so handles sit inside the doc edge
+  return corners.map(c=>({x:c.x*0.96+0.02,y:c.y*0.96+0.02}));
 }
 
 // PERSPECTIVE WARP
