@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+ScanVault icon — Instagram-style gradient + document scanner motif.
+Design: centred document with scan-frame brackets around it + scan line.
+"""
 import struct, zlib, math, os
 
 def write_png(path, w, h, pixels):
@@ -8,134 +12,161 @@ def write_png(path, w, h, pixels):
         b'\x00' + bytes(v for px in pixels[y*w:(y+1)*w] for v in px)
         for y in range(h)
     )
-    data = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + \
-           chunk(b'IDAT', zlib.compress(raw, 9)) + chunk(b'IEND', b'')
+    data = (b'\x89PNG\r\n\x1a\n'
+            + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0))
+            + chunk(b'IDAT', zlib.compress(raw, 9))
+            + chunk(b'IEND', b''))
     with open(path, 'wb') as f:
         f.write(data)
 
-def lerp(a, b, t):
+def clamp(v, lo=0, hi=255):
+    return max(lo, min(hi, int(v + 0.5)))
+
+def lerp_color(stops, t):
     t = max(0.0, min(1.0, t))
-    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(len(a)))
+    for i in range(len(stops) - 1):
+        t0, c0 = stops[i]
+        t1, c1 = stops[i + 1]
+        if t <= t1:
+            f = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+            return tuple(clamp(c0[j] + (c1[j] - c0[j]) * f) for j in range(3))
+    return stops[-1][1]
 
-def alpha_over(dst, src):
-    sa = src[3] / 255.0
-    da = dst[3] / 255.0
-    oa = sa + da * (1 - sa)
-    if oa < 1e-6:
-        return (0, 0, 0, 0)
-    r = int((src[0]*sa + dst[0]*da*(1-sa)) / oa)
-    g = int((src[1]*sa + dst[1]*da*(1-sa)) / oa)
-    b = int((src[2]*sa + dst[2]*da*(1-sa)) / oa)
-    return (r, g, b, int(oa * 255))
+def blend(bg, rgb, a):
+    return (
+        clamp(rgb[0]*a + bg[0]*(1-a)),
+        clamp(rgb[1]*a + bg[1]*(1-a)),
+        clamp(rgb[2]*a + bg[2]*(1-a)),
+        clamp(bg[3]*(1-a) + 255*a),
+    )
 
-def draw_icon(size):
-    S = size
-    BG    = (11, 12, 18, 255)
-    CYAN  = (99, 226, 255, 255)
-    TRANS = (0, 0, 0, 0)
+IG = [
+    (0.00, (252, 175,  69)),
+    (0.25, (247, 119,  55)),
+    (0.50, (253,  29,  29)),
+    (0.75, (225,  48, 108)),
+    (1.00, (131,  58, 180)),
+]
+W = (255, 255, 255)
 
-    px = [TRANS] * (S * S)
+def draw_icon(S):
+    px = [(0,0,0,0)] * (S*S)
 
-    def set_px(x, y, c):
-        if 0 <= x < S and 0 <= y < S:
-            px[y*S + x] = alpha_over(px[y*S + x], c)
-
-    # ── Rounded square background ──
-    r = S * 22 // 100
+    # ── 1. Gradient rounded-square background ─────────────────────────────
+    r = S * 0.22
     for y in range(S):
         for x in range(S):
-            cx = max(r, min(S - 1 - r, x))
-            cy = max(r, min(S - 1 - r, y))
-            dist = math.hypot(x - cx, y - cy)
-            if dist < r - 0.5:
-                px[y*S + x] = BG
-            elif dist < r + 0.5:
-                aa = r + 0.5 - dist
-                px[y*S + x] = lerp(TRANS, BG, aa)
-
-    # ── Document rectangle ──
-    dm = int(S * 0.13)
-    dr = int(S * 0.60)
-    dt = int(S * 0.11)
-    db = int(S * 0.80)
-    drad = max(3, int(S * 0.04))
-    sw = max(2, int(S * 0.030))
-
-    def in_rrect(x, y, x1, y1, x2, y2, rad):
-        cx2 = max(x1 + rad, min(x2 - rad, x))
-        cy2 = max(y1 + rad, min(y2 - rad, y))
-        return math.hypot(x - cx2, y - cy2) <= rad
-
-    for y in range(S):
-        for x in range(S):
-            if px[y*S + x][3] == 0:
+            cx = max(r, min(S-1-r, x))
+            cy = max(r, min(S-1-r, y))
+            d  = math.hypot(x-cx, y-cy)
+            if d >= r + 1.0:
                 continue
-            outer = in_rrect(x, y, dm, dt, dr, db, drad)
-            inner = in_rrect(x, y, dm+sw, dt+sw, dr-sw, db-sw, max(1, drad-sw))
-            if outer and not inner:
-                # anti-alias edge
-                # Compute dist to outer boundary (approx)
-                ccx = max(dm+drad, min(dr-drad, x))
-                ccy = max(dt+drad, min(db-drad, y))
-                d = math.hypot(x-ccx, y-ccy)
-                aa = min(1.0, drad - d + 0.5) if d > drad - 0.5 else 1.0
-                c = (CYAN[0], CYAN[1], CYAN[2], int(255*aa))
-                px[y*S + x] = alpha_over(px[y*S + x], c)
+            t  = (x/S + (S-1-y)/S) / 2.0
+            rgb = lerp_color(IG, t)
+            aa  = 1.0 if d <= r-1.0 else (r+1.0-d)
+            px[y*S+x] = blend(px[y*S+x], rgb, aa)
 
-    # ── Text lines inside doc ──
-    lx1 = int(S * 0.20)
-    lh  = max(1, int(S * 0.028))
-    lines = [
-        (int(S*0.295), int(S*0.57), 220),
-        (int(S*0.370), int(S*0.48), 160),
-        (int(S*0.445), int(S*0.53), 140),
-        (int(S*0.520), int(S*0.38), 110),
-    ]
-    for (ly, lx2, alpha) in lines:
+    def paint(x, y, rgb, a=1.0):
+        xi, yi = int(x+0.5), int(y+0.5)
+        if 0<=xi<S and 0<=yi<S and px[yi*S+xi][3]>0:
+            px[yi*S+xi] = blend(px[yi*S+xi], rgb, a)
+
+    def hline(x0, x1, y, h, rgb, a=1.0):
+        for dy in range(h):
+            for x in range(x0, x1):
+                paint(x, y+dy, rgb, a)
+
+    def vline(x, y0, y1, w, rgb, a=1.0):
+        for dx in range(w):
+            for y in range(y0, y1):
+                paint(x+dx, y, rgb, a)
+
+    # ── 2. Centred document silhouette ─────────────────────────────────────
+    cx_ = S * 0.50
+    cy_ = S * 0.50
+    dw  = S * 0.42   # doc width
+    dh  = S * 0.52   # doc height
+    x1  = int(cx_ - dw/2)
+    x2  = int(cx_ + dw/2)
+    y1  = int(cy_ - dh/2)
+    y2  = int(cy_ + dh/2)
+    rad = max(3, int(S*0.05))
+
+    # Soft white fill
+    for y in range(y1, y2):
+        for x in range(x1, x2):
+            ccx2 = max(x1+rad, min(x2-rad, x))
+            ccy2 = max(y1+rad, min(y2-rad, y))
+            d2 = math.hypot(x-ccx2, y-ccy2)
+            if d2 <= rad:
+                paint(x, y, W, 0.88)
+
+    # Stroke outline
+    sw = max(2, int(S*0.030))
+    for y in range(max(0,y1-2), min(S,y2+2)):
+        for x in range(max(0,x1-2), min(S,x2+2)):
+            ccx2 = max(x1+rad, min(x2-rad, x))
+            ccy2 = max(y1+rad, min(y2-rad, y))
+            d2   = math.hypot(x-ccx2, y-ccy2)
+            on_stroke = abs(d2 - rad) <= sw/2
+            if on_stroke:
+                aa2 = max(0.0, 1.0 - abs(d2-rad)/(sw/2+0.5))
+                paint(x, y, W, aa2)
+
+    # ── 3. Text lines ──────────────────────────────────────────────────────
+    lx1 = x1 + int(S*0.07)
+    lh  = max(1, int(S*0.025))
+    lg  = int(S*0.060)
+    ly0 = y1 + int(S*0.10)
+    for i, (lx2, la) in enumerate([(x2-int(S*.09), 0.65),(x2-int(S*.14),0.50),(x2-int(S*.11),0.45),(x2-int(S*.18),0.38)]):
         for dy in range(lh):
             for x in range(lx1, lx2):
-                y = ly + dy
-                if 0 <= y < S and 0 <= x < S and px[y*S+x][3] > 0:
-                    px[y*S+x] = alpha_over(px[y*S+x], (CYAN[0], CYAN[1], CYAN[2], alpha))
+                y = ly0 + i*lg + dy
+                t = (x/S+(S-1-y)/S)/2
+                rgb = lerp_color(IG, t)
+                rgb = tuple(clamp(rgb[j]*0.25 + W[j]*0.75) for j in range(3))
+                paint(x, y, rgb, la)
 
-    # ── Plus circle bottom-right ──
-    ccx = int(S * 0.745)
-    ccy = int(S * 0.745)
-    cr  = int(S * 0.185)
-    psw = max(2, int(S * 0.030))
+    # ── 4. Scan-frame brackets (larger, wrapping the document) ────────────
+    pad   = int(S * 0.08)   # gap outside document edge
+    fx1   = x1 - pad
+    fx2   = x2 + pad
+    fy1   = y1 - pad
+    fy2   = y2 + pad
+    bl    = max(4, int(S * 0.13))  # bracket arm length
+    bw2   = max(2, int(S * 0.038)) # bracket arm width
 
-    for y in range(S):
-        for x in range(S):
-            if px[y*S + x][3] == 0:
-                continue
-            d = math.hypot(x - ccx, y - ccy)
-            if d < cr - psw - 0.5:
-                # inner fill — slight cyan tint on bg
-                px[y*S+x] = alpha_over(px[y*S+x], (CYAN[0], CYAN[1], CYAN[2], 25))
-            elif d < cr + 0.5:
-                aa = min(1.0, cr - d + 0.5) if d > cr - 0.5 else 1.0
-                px[y*S+x] = alpha_over(px[y*S+x], (CYAN[0], CYAN[1], CYAN[2], int(255*aa)))
+    # top-left
+    hline(fx1, fx1+bl, fy1, bw2, W, 0.97)
+    vline(fx1, fy1,    fy1+bl, bw2, W, 0.97)
+    # top-right
+    hline(fx2-bl, fx2, fy1, bw2, W, 0.97)
+    vline(fx2-bw2, fy1, fy1+bl, bw2, W, 0.97)
+    # bottom-left
+    hline(fx1, fx1+bl, fy2-bw2, bw2, W, 0.97)
+    vline(fx1, fy2-bl, fy2, bw2, W, 0.97)
+    # bottom-right
+    hline(fx2-bl, fx2, fy2-bw2, bw2, W, 0.97)
+    vline(fx2-bw2, fy2-bl, fy2, bw2, W, 0.97)
 
-    # ── Plus sign ──
-    pa  = int(cr * 0.50)
-    pt  = max(1, int(S * 0.028))
-    half = pt // 2
-    for k in range(-pa, pa+1):
-        for t in range(-half, half+1):
-            # horizontal
-            x, y = ccx+k, ccy+t
-            if 0 <= x < S and 0 <= y < S and px[y*S+x][3] > 0:
-                px[y*S+x] = alpha_over(px[y*S+x], (BG[0], BG[1], BG[2], 245))
-            # vertical
-            x, y = ccx+t, ccy+k
-            if 0 <= x < S and 0 <= y < S and px[y*S+x][3] > 0:
-                px[y*S+x] = alpha_over(px[y*S+x], (BG[0], BG[1], BG[2], 245))
+    # ── 5. Horizontal scan line through document ───────────────────────────
+    scan_y = (y1 + y2) // 2
+    scan_h2 = max(1, int(S * 0.016))
+    for dy in range(scan_h2):
+        y = scan_y + dy - scan_h2//2
+        for x in range(x1+sw+2, x2-sw-2):
+            # Fade at left/right edges
+            edge = min(x-(x1+sw+2), (x2-sw-2)-x) / max(1, dw*0.15)
+            aa3  = min(1.0, edge) * 0.85
+            paint(x, y, W, aa3)
 
     return px
 
-os.makedirs('icons', exist_ok=True)
-for size in [72, 96, 128, 144, 152, 192, 384, 512]:
-    pixels = draw_icon(size)
-    write_png(f'icons/icon-{size}.png', size, size, pixels)
-    print(f'  icon-{size}.png ✓')
-print('Icons generated.')
+
+if __name__ == '__main__':
+    os.makedirs('icons', exist_ok=True)
+    for size in [72, 96, 128, 144, 152, 192, 384, 512]:
+        pixels = draw_icon(size)
+        write_png(f'icons/icon-{size}.png', size, size, pixels)
+        print(f'  icon-{size}.png ✓')
+    print('Done.')
