@@ -19,7 +19,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: npm
 
       - uses: actions/setup-java@v4
         with:
@@ -35,7 +34,7 @@ jobs:
           sdkmanager --install "ndk;27.1.12297006" 2>/dev/null || sdkmanager --install "ndk;26.1.10909125" 2>/dev/null || true
 
       - name: Install npm dependencies
-        run: npm ci --legacy-peer-deps
+        run: npm install --legacy-peer-deps
 
       - name: Generate placeholder assets
         run: |
