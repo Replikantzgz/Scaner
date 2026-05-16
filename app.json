@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "ScanVault",
+    "slug": "scanvault",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0C0E1A"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.scanvault.app"
+    },
+    "android": {
+      "package": "com.scanvault.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0C0E1A"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      ["expo-camera", { "cameraPermission": "ScanVault necesita acceso a la cámara para escanear documentos." }],
+      ["expo-media-library", { "photosPermission": "ScanVault necesita acceso a tu galería para importar imágenes.", "savePhotosPermission": "ScanVault necesita permiso para guardar documentos." }],
+      ["expo-image-picker", { "photosPermission": "ScanVault necesita acceso a tu galería." }]
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
