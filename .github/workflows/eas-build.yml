@@ -28,9 +28,6 @@ jobs:
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Configure npm
-        run: npm config set legacy-peer-deps true
-
       - name: Install npm dependencies
         run: npm install
 
@@ -49,7 +46,7 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x android/gradlew
-          cd android && ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -150
+          cd android && ./gradlew assembleDebug --no-daemon --stacktrace
         env:
           GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
 
@@ -81,7 +78,6 @@ jobs:
             - Corrección de perspectiva (homografía)
             - Modos: Mejorar / Color / B&N / Original
             - Exportar PDF
-            - OCR offline
             - Almacenamiento local con AsyncStorage
 
             **Instalar:** descarga `ScanVault.apk` → abre en el móvil → Instalar

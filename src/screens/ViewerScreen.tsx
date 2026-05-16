@@ -1,12 +1,11 @@
-import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { readAsStringAsync } from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, FlatList, Modal,
-  SafeAreaView, ScrollView, Share, StyleSheet, Text,
+  ActivityIndicator, Alert, FlatList,
+  SafeAreaView, StyleSheet, Text,
   TouchableOpacity, View,
 } from 'react-native';
 import { Scan, db } from '../storage/db';
@@ -23,8 +22,6 @@ export function ViewerScreen({ navigation, route }: Props) {
   const [showOrig, setShowOrig] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyMsg, setBusyMsg] = useState('');
-  const [ocrText, setOcrText] = useState('');
-  const [showOcr, setShowOcr] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
 
   const load = useCallback(async () => {
@@ -71,31 +68,6 @@ export function ViewerScreen({ navigation, route }: Props) {
       await Sharing.shareAsync(uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
     } catch (e: any) {
       Alert.alert('Error PDF', e.message ?? String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const runOCR = async () => {
-    if (!scan) return;
-    setBusy(true);
-    setBusyMsg('Reconociendo texto...');
-    try {
-      const mod = require('@react-native-ml-kit/text-recognition');
-      const TR = mod.default ?? mod;
-      const uri = pages[currentPage] ?? scan.pages[0];
-      const result = await TR.recognize(uri);
-      const text: string = (result.text ?? result.resultText ?? '').trim();
-      if (!text) {
-        Alert.alert('OCR', 'No se detectó texto en esta página.');
-      } else {
-        setOcrText(text);
-        setShowOcr(true);
-      }
-    } catch (e: any) {
-      Alert.alert('OCR', e.code === 'MODULE_NOT_FOUND'
-        ? 'Disponible solo en builds nativos (EAS Build).'
-        : e.message ?? String(e));
     } finally {
       setBusy(false);
     }
@@ -153,7 +125,10 @@ export function ViewerScreen({ navigation, route }: Props) {
           <Text style={styles.toolIcon}>🔍</Text>
           <Text style={styles.toolLabel}>{showOrig ? 'Procesado' : 'Original'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.toolBtn} onPress={runOCR} disabled={busy}>
+        <TouchableOpacity
+          style={styles.toolBtn}
+          onPress={() => Alert.alert('OCR', 'Reconocimiento de texto disponible próximamente.')}
+        >
           <Text style={styles.toolIcon}>📝</Text>
           <Text style={styles.toolLabel}>OCR</Text>
         </TouchableOpacity>
@@ -177,40 +152,6 @@ export function ViewerScreen({ navigation, route }: Props) {
           <Text style={styles.busyText}>{busyMsg}</Text>
         </View>
       )}
-
-      {/* OCR modal */}
-      <Modal visible={showOcr} animationType="slide" transparent>
-        <View style={styles.ocrBg}>
-          <View style={styles.ocrBox}>
-            <View style={styles.ocrHeaderRow}>
-              <Text style={styles.ocrTitle}>Texto reconocido</Text>
-              <TouchableOpacity onPress={() => setShowOcr(false)}>
-                <Text style={styles.ocrClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.ocrScroll}>
-              <Text style={styles.ocrText} selectable>{ocrText}</Text>
-            </ScrollView>
-            <View style={styles.ocrBtns}>
-              <TouchableOpacity
-                style={styles.ocrBtn}
-                onPress={async () => {
-                  await Clipboard.setStringAsync(ocrText);
-                  Alert.alert('Copiado', 'Texto copiado al portapapeles.');
-                }}
-              >
-                <Text style={styles.ocrBtnText}>📋 Copiar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.ocrBtn, styles.ocrBtnAccent]}
-                onPress={() => Share.share({ message: ocrText, title: scan?.name })}
-              >
-                <Text style={[styles.ocrBtnText, { color: colors.white }]}>↑ Compartir</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -241,15 +182,4 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   busyText: { color: colors.white, marginTop: spacing.md, fontSize: font.md },
-  ocrBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  ocrBox: { backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: spacing.xl, maxHeight: '70%' },
-  ocrHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
-  ocrTitle: { color: colors.text, fontSize: font.xl, fontWeight: '700' },
-  ocrClose: { color: colors.textSub, fontSize: font.xl, padding: spacing.sm },
-  ocrScroll: { maxHeight: 300, marginBottom: spacing.md },
-  ocrText: { color: colors.text, fontSize: font.md, lineHeight: 22 },
-  ocrBtns: { flexDirection: 'row', gap: spacing.md },
-  ocrBtn: { flex: 1, padding: spacing.md, borderRadius: radius.lg, backgroundColor: colors.surface2, alignItems: 'center' },
-  ocrBtnAccent: { backgroundColor: colors.accent },
-  ocrBtnText: { color: colors.text, fontWeight: '700', fontSize: font.sm },
 });
