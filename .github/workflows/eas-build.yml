@@ -25,28 +25,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK info
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls $ANDROID_HOME/ndk 2>/dev/null || echo "No NDK dir"
-          ls $ANDROID_HOME/platforms 2>/dev/null | head -5
-
       - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
 
+      - name: Install Expo-managed packages (version resolved by SDK)
+        run: npx expo install expo-print expo-clipboard
+
       - name: Generate placeholder assets
         run: |
           mkdir -p assets
           python3 - <<'EOF'
-          import base64, os
-          png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=')
-          for f in ['icon.png','adaptive-icon.png','splash-icon.png','favicon.png']:
-              open('assets/'+f,'wb').write(png)
-          EOF
+import base64, os
+png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=')
+for f in ['icon.png','adaptive-icon.png','splash-icon.png','favicon.png']:
+    open('assets/'+f,'wb').write(png)
+EOF
 
       - name: Expo prebuild
         run: npx expo prebuild --platform android --non-interactive
@@ -56,14 +52,14 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x android/gradlew
-          cd android && ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -100
+          cd android && ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -150
         env:
           GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
 
       - name: Copy APK
         run: |
           APK=$(find android/app/build/outputs/apk -name "*.apk" ! -path "*androidTest*" | head -1)
-          echo "APK found: $APK"
+          echo "APK: $APK"
           cp "$APK" ScanVault.apk
 
       - name: Upload artifact
