@@ -31,18 +31,11 @@ jobs:
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Install Expo-managed packages (version resolved by SDK)
+      - name: Install Expo-managed packages
         run: npx expo install expo-print expo-clipboard
 
       - name: Generate placeholder assets
-        run: |
-          mkdir -p assets
-          python3 - <<'EOF'
-import base64, os
-png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=')
-for f in ['icon.png','adaptive-icon.png','splash-icon.png','favicon.png']:
-    open('assets/'+f,'wb').write(png)
-EOF
+        run: node -e "const fs=require('fs');fs.mkdirSync('assets',{recursive:true});const b=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=','base64');['icon.png','adaptive-icon.png','splash-icon.png','favicon.png'].forEach(f=>fs.writeFileSync('assets/'+f,b));"
 
       - name: Expo prebuild
         run: npx expo prebuild --platform android --non-interactive
