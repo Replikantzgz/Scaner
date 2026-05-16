@@ -1,9 +1,7 @@
-// Image enhancement modes — ported from index.html enhanceScanImage()
-
 export type EnhanceMode = 'mejorar' | 'color' | 'bw' | 'original';
 
 export function enhancePixels(
-  pixels: Uint8Array, // RGBA, mutated in-place
+  pixels: Uint8Array,
   w: number,
   h: number,
   mode: EnhanceMode,
@@ -11,21 +9,22 @@ export function enhancePixels(
   if (mode === 'original') return;
 
   if (mode === 'mejorar') {
-    // Adaptive threshold via integral image — identical to CamScanner "Mejorar"
-    const gv = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++)
+    const N = w * h;
+    const gv = new Uint8Array(N);
+    for (let i = 0; i < N; i++)
       gv[i] = (77 * pixels[i * 4] + 150 * pixels[i * 4 + 1] + 29 * pixels[i * 4 + 2]) >> 8;
 
     const ii = new Float64Array((w + 1) * (h + 1));
-    for (let y = 0; y < h; y++) {
+    for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
         ii[(y + 1) * (w + 1) + (x + 1)] =
           gv[i] + ii[y * (w + 1) + (x + 1)] + ii[(y + 1) * (w + 1) + x] - ii[y * (w + 1) + x];
       }
-    }
-    const half = (Math.max(20, (Math.min(w, h) * 0.07) | 0) | 1) >> 1;
-    for (let y = 0; y < h; y++) {
+
+    const half = (Math.max(20, (Math.min(w, h) * 0.08) | 0) | 1) >> 1;
+    const mask = new Uint8Array(N);
+    for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         const x1 = Math.max(0, x - half), y1 = Math.max(0, y - half);
         const x2 = Math.min(w - 1, x + half), y2 = Math.min(h - 1, y + half);
@@ -35,11 +34,27 @@ export function enhancePixels(
           ii[y1 * (w + 1) + (x2 + 1)] -
           ii[(y2 + 1) * (w + 1) + x1] +
           ii[y1 * (w + 1) + x1];
-        const v = gv[y * w + x] < (s / cnt) * 0.82 ? 15 : 250;
+        mask[y * w + x] = gv[y * w + x] < (s / cnt) * 0.82 ? 1 : 0;
+      }
+
+    // Remove isolated dark pixels (denoise)
+    for (let y = 1; y < h - 1; y++)
+      for (let x = 1; x < w - 1; x++)
+        if (mask[y * w + x]) {
+          const n =
+            (mask[(y - 1) * w + x] ? 1 : 0) +
+            (mask[(y + 1) * w + x] ? 1 : 0) +
+            (mask[y * w + (x - 1)] ? 1 : 0) +
+            (mask[y * w + (x + 1)] ? 1 : 0);
+          if (n < 1) mask[y * w + x] = 0;
+        }
+
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const v = mask[y * w + x] ? 8 : 252;
         const oi = (y * w + x) * 4;
         pixels[oi] = pixels[oi + 1] = pixels[oi + 2] = v;
       }
-    }
     return;
   }
 
@@ -63,7 +78,7 @@ export function enhancePixels(
     }
     const rR = Math.max(1, mxR - mnR), rG = Math.max(1, mxG - mnG), rB = Math.max(1, mxB - mnB);
     for (let i = 0; i < pixels.length; i += 4) {
-      pixels[i] = Math.min(255, Math.max(0, (((pixels[i] - mnR) / rR * 255 - 128) * 1.25 + 150) | 0));
+      pixels[i]     = Math.min(255, Math.max(0, (((pixels[i]     - mnR) / rR * 255 - 128) * 1.25 + 150) | 0));
       pixels[i + 1] = Math.min(255, Math.max(0, (((pixels[i + 1] - mnG) / rG * 255 - 128) * 1.25 + 150) | 0));
       pixels[i + 2] = Math.min(255, Math.max(0, (((pixels[i + 2] - mnB) / rB * 255 - 128) * 1.25 + 150) | 0));
     }
