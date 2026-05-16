@@ -37,13 +37,8 @@ jobs:
       - name: Install Expo-managed packages
         run: npx expo install expo-print expo-clipboard
 
-      - name: Generate assets with ImageMagick
-        run: |
-          mkdir -p assets
-          convert -size 1024x1024 xc:'#1BA97B' assets/icon.png
-          convert -size 1024x1024 xc:'#1BA97B' assets/adaptive-icon.png
-          convert -size 1024x1024 xc:'#0C0E1A' assets/splash-icon.png
-          convert -size 48x48 xc:'#1BA97B' assets/favicon.png
+      - name: Generate assets
+        run: python3 gen_assets.py
 
       - name: Expo prebuild
         run: npx expo prebuild --platform android
