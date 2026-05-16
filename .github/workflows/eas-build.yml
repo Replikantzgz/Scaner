@@ -1,4 +1,4 @@
-name: EAS Build & Release
+name: Build Android APK
 
 on:
   push:
@@ -12,6 +12,7 @@ jobs:
   build:
     name: Build Android APK
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -20,18 +21,46 @@ jobs:
           node-version: '20'
           cache: npm
 
-      - name: Install dependencies
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android components
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager --install "ndk;27.1.12297006" 2>/dev/null || sdkmanager --install "ndk;26.1.10909125" 2>/dev/null || true
+
+      - name: Install npm dependencies
         run: npm ci --legacy-peer-deps
 
-      - uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Generate placeholder assets
+        run: |
+          mkdir -p assets
+          node -e "
+          const fs=require('fs');
+          const b=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=','base64');
+          ['icon.png','adaptive-icon.png','splash-icon.png','favicon.png'].forEach(f=>fs.writeFileSync('assets/'+f,b));
+          "
 
-      - name: Build APK (preview profile)
-        run: eas build --platform android --profile preview --non-interactive --output ./ScanVault.apk
+      - name: Expo prebuild
+        run: npx expo prebuild --platform android --non-interactive
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_NO_TELEMETRY: '1'
+
+      - name: Build debug APK
+        run: |
+          chmod +x android/gradlew
+          cd android && ./gradlew assembleDebug --no-daemon
+        env:
+          GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
+
+      - name: Copy APK
+        run: |
+          find android/app/build/outputs/apk/debug -name "*.apk" | head -1 | xargs -I{} cp {} ScanVault.apk
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -45,16 +74,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: native-v1.0.${{ github.run_number }}
-          name: ScanVault Native v1.0.${{ github.run_number }}
+          tag_name: v1.0.${{ github.run_number }}
+          name: ScanVault v1.0.${{ github.run_number }}
           body: |
-            ## ScanVault Native (Expo) — APK Android
+            ## ScanVault Native — APK Android
 
-            App nativa React Native con:
-            - Cámara real expo-camera
-            - Detección automática de documentos (Otsu)
+            App nativa React Native:
+            - Cámara nativa expo-camera
+            - Detección automática de documentos (Otsu + flood-fill)
             - Corrección de perspectiva (homografía)
-            - Modos Mejorar / Color / B&N / Original
+            - Modos: Mejorar / Color / B&N / Original
+            - Exportar PDF
+            - OCR offline (reconocimiento de texto)
             - Almacenamiento local con AsyncStorage
 
             **Instalar:** descarga `ScanVault.apk` → abre en el móvil → Instalar
